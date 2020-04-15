@@ -248,15 +248,15 @@ class lattice_sim:
 
             
         print(f"worm {i_worm} has closed up")
-        self.reset_worm_i_worm(i_worm,
-                              k_links, l_links, mu, W, f,
-                              old_head_lat, new_head_lat, tail_df_lat,
-                              move_dim, move_sign, move_i, move_set, moves,
-                              head, tail, worm_link_coord, worm_closed,
-                              k_delta, dk, df, df0,
-                              p_acc,
-                              num_worms, lat_size, dim
-                              )
+        #self.reset_worm_i_worm(i_worm,
+        #                      k_links, l_links, mu, W, f,
+        #                      old_head_lat, new_head_lat, tail_df_lat,
+        #                      move_dim, move_sign, move_i, move_set, moves,
+        #                      head, tail, worm_link_coord, worm_closed,
+        #                      k_delta, dk, df, df0,
+        #                      p_acc,
+        #                      num_worms, lat_size, dim
+        #                      )
             
             
     #@jit(nopython=True)
@@ -863,9 +863,9 @@ class lattice_sim:
               k_links, l_links, W, f,
               link_coord, mod_dim, dl, df, df_target,
               move_set, moves,
+              p_acc,
               lat_size, dim,
-              p_acc
-             ):
+              ):
         """
         goal: do a parallel sweep through all given lattice sites
         """
@@ -875,8 +875,8 @@ class lattice_sim:
                          k_links, l_links, W, f,
                          link_coord, mod_dim, dl, df, df_target,
                          move_set, moves,
-                         lat_size, dim,
-                         p_acc
+                         p_acc,
+                         lat_size, dim
                         )
         
 
@@ -886,8 +886,8 @@ class lattice_sim:
                 k_links, l_links, W, f,
                 link_coord, mod_dim, dl, df, df_target,
                 move_set, moves,
-                lat_size, dim,
-                p_acc
+                p_acc,
+                lat_size, dim
                ):
 
         """
