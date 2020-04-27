@@ -38,6 +38,11 @@ class lattice_sim:
         self.dim = len(self.lat_size)
         self.num_sites = np.prod(self.lat_size)
 
+        coords = []
+        for dim_len in self.lat_size:
+            coords.append([i for i in range(dim_len)])
+            
+        self.all_site_coords = product(*coords)
 
         ##size of one link field on the lattice
         self.link_size = np.concatenate(([len(self.lat_size)], self.lat_size))
@@ -134,19 +139,6 @@ class lattice_sim:
         self.p_acc = np.ones(self.num_worms, dtype = float)
 
 
-        dist_ij_shape = np.concatenate( ([self.num_worms, self.num_worms], [len(self.lat_size)]) )
-        ##the distance of proposed heads in the next move
-        ##for head on collisions
-        self.hoc_dist_ij = np.ones(shape=dist_ij_shape, dtype=np.int64)
-        ##the distance of proposed heads to old heads in the next move
-        ##for lateral collisions
-        self.lc_dist_ij = np.ones(shape=dist_ij_shape, dtype=np.int64)
-
-        ##array which keeps track of collisions, arranging all num_worms in collision "classes"
-        ##these have to be sampled successively
-        self.collisions = np.full(shape=(self.num_worms//2,self.dim*2), fill_value=self.num_worms, dtype=np.int64)
-        ##save additional 1 dim list with all worms that participate in collisions
-        self.collision_worms = []
 
 
         ##bool value which keeps track whether a worm has closed up
@@ -201,6 +193,64 @@ class lattice_sim:
         self.mcmc_b_p_acc = np.ones(self.n_b_sites)
 
     
+    #def f_check(self, f, k_links, l_links, all_site_coords, lat_size, move_set, dim):
+    def f_check(self, f, k_links, l_links, lat_size, move_set, dim):
+        all_site_coords = self.all_site_coords
+        
+        print("running f_check")
+        calc_f = np.zeros(lat_size)
+        #print(calc_f.shape)
+        #print(k_links.shape)
+
+        for site_coords in all_site_coords:
+            
+            for d in range(dim):
+                
+                link_coord = np.concatenate([[d], list(site_coords)])
+                #print(f"link_coord {d} and site {site_coords}:")
+                #print(link_coord)
+                calc_f[tuple(site_coords)] += abs(k_links[tuple(link_coord)])
+                calc_f[tuple(site_coords)] += 2*l_links[tuple(link_coord)]
+
+                target_site  = site_coords + move_set[d]
+                self.per_lat_coord(target_site, lat_size, dim)
+                calc_f[tuple(target_site)] += abs(k_links[tuple(link_coord)])
+                calc_f[tuple(target_site)] += 2*l_links[tuple(link_coord)]
+                                           
+        print("calculated f:")
+        print(calc_f)
+        print("saved f:")
+        print(f)
+        
+        return calc_f
+    
+    #def flux_check(self, k_links, all_site_coords, lat_size, move_set, dim):
+    def flux_check(self, k_links, lat_size, move_set, dim):
+        all_site_coords = self.all_site_coords
+        
+        print("running flux_check")
+        div = np.zeros(lat_size)
+        for site_coords in all_site_coords:
+            for d in range(dim):
+                link_coord = np.concatenate([[d], list(site_coords)])
+                div[tuple(site_coords)] += k_links[tuple(link_coord)]
+                target_site  = site_coords + move_set[d]
+                self.per_lat_coord(target_site, lat_size, dim)
+                div[tuple(target_site)] -= k_links[tuple(link_coord)]
+
+        print("k_divergence:")
+        print(div)
+        print(f"flux conserved: {np.all(div == 0)}")
+        
+        return div
+    
+    def l_pos_check(self, l_links):
+        print("running l_pos_check")
+        l_pos = np.all(l_links >= 0)
+        print(f"l >= 0: {l_pos} ")
+        
+        return l_pos
+        
     def run_i_worm(self,
                    i_worm,
                    k_links, l_links, mu, W, f,
@@ -238,6 +288,8 @@ class lattice_sim:
                 """ONLY ACCESS ON WORM AT A TIME"""
                 work_head_lat[tuple(head[i_worm,1])] = 1
                 work_head_lat[tuple(head[i_worm,0])] = 1
+                
+                
 
                 ##continue sampling
                 ##+reset new and old head lat bit
@@ -250,6 +302,10 @@ class lattice_sim:
                                     p_acc,
                                     lat_size, dim
                                     )
+                
+                self.l_pos_check(l_links)
+                self.f_check(f, k_links, l_links, lat_size, move_set, dim)
+                self.flux_check(k_links, lat_size, move_set, dim)
 
             
         print(f"worm {i_worm} has closed up")
@@ -262,7 +318,14 @@ class lattice_sim:
         #                      p_acc,
         #                      num_worms, lat_size, dim
         #                      )
-            
+        
+        self.l_pos_check(l_links)
+        self.f_check(f, k_links, l_links, lat_size, move_set, dim)
+        self.flux_check(k_links, lat_size, move_set, dim)
+        print("k_links")
+        print(k_links)
+        #print("l_links")
+        #print(l_links)
             
     #@jit(nopython=True)
     def reset_worm_i_worm(self,
@@ -288,7 +351,8 @@ class lattice_sim:
         worm_closed[i_worm] = 1
         print("f before:")
         print(f)
-        f[tail[i_worm]] += df0[i_worm]
+        """F EVEN?"""
+        #f[tail[i_worm]] += df0[i_worm]
         print("f after:")
         print(f)
         k_delta[i_worm] = np.random.randint(low=0, high=2)*2 - 1
@@ -316,6 +380,7 @@ class lattice_sim:
         ##continue sampling until the worm starts and opens up
         while worm_closed[i_worm]:
             
+            """PICK RANDOM TAIL HERE"""
             #propose an initial move
             self.propose_move_i_worm(i_worm,
                                      k_links,
@@ -376,13 +441,13 @@ class lattice_sim:
 
         ##draw a ranom move dimension (dir_i) and orientation (sign)
         move_dim[i_worm] = np.random.randint(low=0, high=dim)
-        print(f"proposing move_dim:\n {move_dim}")
+        #print(f"proposing move_dim:\n {move_dim}")
         move_sign[i_worm] = np.random.randint(low=0, high=2)
-        print(f"proposing sign:\n {move_sign}")
+        #print(f"proposing sign:\n {move_sign}")
 
         ##calculate the corresponding move_index for the move_set
         move_i[i_worm] = move_dim[i_worm] + (dim * move_sign[i_worm])
-        print(f"proposing move_i:\n {move_i}")
+        #print(f"proposing move_i:\n {move_i}")
 
         ##and move
         moves[i_worm] = move_set[ move_i[i_worm] ]
@@ -399,7 +464,7 @@ class lattice_sim:
         ##the new proposed head if the move is accepted
         head[i_worm,1] = head[i_worm,0] + moves[i_worm]
 
-        print(f"proposing new heads:\n {head[:,1]}")
+        #print(f"proposing new heads:\n {head[:,1]}")
 
         ##check whether the new head has to be changed for periodic bc
         self.per_lat_coord(head[i_worm,1], lat_size, dim)
@@ -418,7 +483,7 @@ class lattice_sim:
         df[i_worm] = df_p
         #df_prev_iter[i_worm] = df_p
         
-        print(f"k_old: {old_k}")
+        #print(f"k_old: {old_k}")
         print(f"dk: {dk}")
         print(f"df: {df}")
 
@@ -478,6 +543,9 @@ class lattice_sim:
             print("f before:")
             print(f)
             #f[tuple(head[i_worm,0])] += (bool_acc * df[i_worm]) + df_prev_iter[i_worm]
+            print(f"old head {tuple(head[i_worm,0])}")
+            print(f"df[i_worm] {df[i_worm]}")
+            print(f"df_prev_iter[i_worm] {df_prev_iter[i_worm]}")
             f[tuple(head[i_worm,0])] += bool_acc * (df[i_worm] + df_prev_iter[i_worm])
             print("f after:")
             print(f)
@@ -511,7 +579,7 @@ class lattice_sim:
             #worm_closed[i_worm] = np.all( head[i_worm,0] == tail[i_worm] )
             print(f"head: {head[i_worm,0]}, tail: {tail[i_worm]}")
             
-            print(f"worm closed: {worm_closed[i_worm]}")
+            #print(f"worm closed: {worm_closed[i_worm]}")
             worm_closed[i_worm] = bool(1 - np.sign( ((head[i_worm,0] - tail[i_worm])**2).sum() ))
             print(f"worm closed: {worm_closed[i_worm]}")
             ##reset prop head to old head
@@ -564,26 +632,27 @@ class lattice_sim:
         print(f"l_old_link {l_old_link}")
         print(f"k_proposed_link {k_proposed_link}")
         print(f"k_old_link {k_old_link}")
-        print(f"(abs(k_proposed_link) + l_old_link) {(abs(k_proposed_link) + l_old_link)}")
+        #print(f"(abs(k_proposed_link) + l_old_link) {(abs(k_proposed_link) + l_old_link)}")
         
-        print(f"p_acc[i_worm] {p_acc[i_worm]}")
+        #print(f"p_acc[i_worm] {p_acc[i_worm]}")
         
         if abs(k_proposed_link) > abs(k_old_link):
             p_acc[i_worm] = p_acc[i_worm] / float((abs(k_proposed_link) + l_old_link))
         else:
             p_acc[i_worm] = p_acc[i_worm] * float((abs(k_old_link) + l_old_link))
 
-        print(f"p_acc[i_worm] {p_acc[i_worm]}")
-        print(f"int((f_old + df[i_worm] + df_prev_iter[i_worm])) {int((f_old + df[i_worm] + df_prev_iter[i_worm]))}")
-        print(f"int((f_prop_head + df_new_head) {int((f_prop_head + df_new_head))}")
+        #print(f"p_acc[i_worm] {p_acc[i_worm]}")
+        #print(f"int((f_old + df[i_worm] + df_prev_iter[i_worm])) {int((f_old + df[i_worm] + df_prev_iter[i_worm]))}")
+        """DF AT TAIL UNEVEN"""
+        #print(f"int((f_prop_head + df_new_head) {int((f_prop_head + df_new_head))}")
 
-        print(f"W[int((f_old + df[i_worm] + df_prev_iter[i_worm])//2)] {W[int((f_old + df[i_worm] + df_prev_iter[i_worm])//2)]}")
-        print(f"W[int((f_prop_head + df_new_head)//2)] {W[int((f_prop_head + df_new_head)//2)]}")
+        #print(f"W[int((f_old + df[i_worm] + df_prev_iter[i_worm])//2)] {W[int((f_old + df[i_worm] + df_prev_iter[i_worm])//2)]}")
+        #print(f"W[int((f_prop_head + df_new_head)//2)] {W[int((f_prop_head + df_new_head)//2)]}")
         ##multiply p with W[f_prop/2]
         #p_acc[i_worm] *= W[int((f_old + df)//2)]/W[int((f_prop_head + df_new_head)//2)]
         p_acc[i_worm] *= W[int((f_old + df[i_worm] + df_prev_iter[i_worm])//2)]/W[int((f_prop_head + df_new_head)//2)]
         
-        print(f"p_acc[i_worm] {p_acc[i_worm]}")
+        #print(f"p_acc[i_worm] {p_acc[i_worm]}")
 
 
         ###p *= ( (1 - int(np.all(old_head == tail)))*W[int((f_old + df)//2)] + int(np.all(old_head == tail)) )/W[int(f_prop_head//2)]
@@ -592,13 +661,13 @@ class lattice_sim:
         #if worm_link_coord[i_worm][0] == 0:
         #    #p *= np.exp((1. - 2.*sign)*mu*value)
         #    p *= np.exp(float(dk)*mu)
-        print(f"float(dk) {float(dk)}")
-        print(f"mu {mu}")
-        print(f"np.exp( (1-np.sign(worm_link_coord[i_worm][0])) * float(dk) * mu ) {np.exp( (1-np.sign(worm_link_coord[i_worm][0])) * float(dk) * mu )}")
+        #print(f"float(dk) {float(dk)}")
+        #print(f"mu {mu}")
+        #print(f"np.exp( (1-np.sign(worm_link_coord[i_worm][0])) * float(dk) * mu ) {np.exp( (1-np.sign(worm_link_coord[i_worm][0])) * float(dk) * mu )}")
         #p_acc[i_worm] *= np.exp( np.sign(worm_link_coord[i_worm][0])*float(dk)*mu )
         p_acc[i_worm] *= np.exp( (1-np.sign(worm_link_coord[i_worm][0])) * float(dk) * mu )
         
-        print(f"p_acc[i_worm] {p_acc[i_worm]}")
+        #print(f"p_acc[i_worm] {p_acc[i_worm]}")
 
         #print(f"k_old {k_old_link}")
         #print(f"dk {dk}")
@@ -740,24 +809,24 @@ class lattice_sim:
         print(f"l_old_link {l_old_link}")
         print(f"k_proposed_link {k_proposed_link}")
         print(f"k_old_link {k_old_link}")
-        print(f"(abs(k_proposed_link) + l_old_link) {(abs(k_proposed_link) + l_old_link)}")
+        #print(f"(abs(k_proposed_link) + l_old_link) {(abs(k_proposed_link) + l_old_link)}")
         
-        print(f"p_acc[i_worm] {p_acc[i_worm]}")
+        #print(f"p_acc[i_worm] {p_acc[i_worm]}")
         
         if abs(k_proposed_link) > abs(k_old_link):
             p_acc[i_worm] = p_acc[i_worm] / (abs(k_proposed_link) + l_old_link)
         else:
             p_acc[i_worm] = p_acc[i_worm] * (abs(k_old_link) + l_old_link)
 
-        print(f"p_acc[i_worm] {p_acc[i_worm]}")
-        print(f"int((f_prop_head + df_new_head))] {int((f_prop_head + df_new_head))}")
+        #print(f"p_acc[i_worm] {p_acc[i_worm]}")
+        #print(f"int((f_prop_head + df_new_head))] {int((f_prop_head + df_new_head))}")
         
-        print(f"W[int((f_prop_head + df_new_head)//2)] {W[int((f_prop_head + df_new_head)//2)]}")
+        #print(f"W[int((f_prop_head + df_new_head)//2)] {W[int((f_prop_head + df_new_head)//2)]}")
 
         ##multiply p with W[f_prop/2]
         p_acc[i_worm] *= 1./W[int((f_prop_head + df_new_head)//2)]
 
-        print(f"p_acc[i_worm] {p_acc[i_worm]}")
+        #print(f"p_acc[i_worm] {p_acc[i_worm]}")
         
         ###p *= ( (1 - int(np.all(old_head == tail)))*W[int((f_old + df)//2)] + int(np.all(old_head == tail)) )/W[int(f_prop_head//2)]
 
@@ -766,14 +835,14 @@ class lattice_sim:
         #    #p *= np.exp((1. - 2.*sign)*mu*value)
         #    p *= np.exp(float(dk)*mu)
         
-        print(f"float(dk) {float(dk)}")
-        print(f"mu {mu}")
-        print(f"np.exp( (1-np.sign(worm_link_coord[i_worm][0])) * float(dk) * mu ) {np.exp( (1-np.sign(worm_link_coord[i_worm][0])) * float(dk) * mu )}")
+        #print(f"float(dk) {float(dk)}")
+        #print(f"mu {mu}")
+        #print(f"np.exp( (1-np.sign(worm_link_coord[i_worm][0])) * float(dk) * mu ) {np.exp( (1-np.sign(worm_link_coord[i_worm][0])) * float(dk) * mu )}")
             
         p_acc[i_worm] *= np.exp( (1-np.sign(worm_link_coord[i_worm][0])) * float(dk) * mu )
         #p_acc[i_worm] = p_acc[i_worm]* (np.exp( (1-np.sign(worm_link_coord[i_worm][0])) * float(dk) * mu ))
         
-        print(f"p_acc[i_worm] {p_acc[i_worm]}")
+        #print(f"p_acc[i_worm] {p_acc[i_worm]}")
 
         #print(f"k_old {k_old_link}")
         #print(f"dk {dk}")
@@ -782,47 +851,6 @@ class lattice_sim:
         #print(f"df_new_head {df_new_head}")
         #print(f"p {p}")
         
-
-
-
-        
-
-    def remove_closed_worms(self, closed_i_worms, open_i_worms, num_worms, head, tail, k_delta, df0, worm_closed, catch_tail, starting, dim):
-        """
-        If worm simulation needs to be completed, worms have to be remove ocne they are finished
-        At the end of a simulation all worms should be closed
-        This saves the characteristic attributes of open worms and discards closed onws
-        """
-
-        new_num_worms = len(open_i_worms)
-
-        open_worms_head = np.zeros((new_num_worms, 2, dim), dtype = int)
-        open_worms_tail = np.zeros((new_num_worms, dim), dtype = int)
-        open_worms_k_delta = np.zeros(new_num_worms, dtype = int)
-        open_worms_df0 = np.zeros(new_num_worms, dtype = int)
-        open_worms_catch_tail = np.full(shape=new_num_worms, fill_value=new_num_worms, dtype=np.int64)
-
-        ##create a filtered copy of old arrays
-        for new_i_worm, open_i_worm in enumerate(open_i_worms):
-            open_worms_head[new_i_worm] = head[open_i_worm]
-            open_worms_tail[new_i_worm] = tail[open_i_worm]
-            open_worms_k_delta[new_i_worm] = k_delta[open_i_worm]
-            open_worms_df0[new_i_worm] = df0[open_i_worm]
-
-        ##overwrite worm values with filtered versions
-        """correct referencing to class attribute?"""
-        num_worms = new_num_worms
-
-        head = open_worms_head
-        tail = open_worms_tail
-        k_delta = open_worms_k_delta
-        df0 = open_worms_df0
-        catch_tail = open_worms_catch_tail
-        """correct referencing to class attribute?"""
-        worm_closing = np.full(fill_value = 0, shape=num_worms, dtype=bool)
-        starting = np.full(fill_value = 0, shape=num_worms, dtype=bool)
-
-
 
 
     """Lattice functions"""
@@ -1012,7 +1040,7 @@ class lattice_sim:
         print(f"p_acc: {p_acc[i_site]}")
         print(f"p_draw: {p_draw}")
         bool_acc = int( (1 + np.sign(p_acc[i_site] - p_draw))*0.5 )
-        print(f"accpeted: {bool_acc}")
+        print(f"accepted: {bool_acc}")
         print("f before:")
         print(f)
         print(f"modifying link {link_coord[i_site]}, value {l_links[tuple(link_coord[i_site])]}")
@@ -1040,14 +1068,14 @@ class lattice_sim:
         """
         """find better method"""
         mod_dim[i_site] = np.random.randint(low=0, high=dim)
-        print(f"mod_dim: {mod_dim[i_site]}")
+        #print(f"mod_dim: {mod_dim[i_site]}")
         #if l_links[tuple(link_coord[i_site])] == 0:
         #    dl[i_site] = 1
         #else:
         #    dl[i_site] = (2*np.random.randint(low=0, high=2) - 1)
         
         dl[i_site] = int( 1 - 2*np.sign(l_links[tuple(link_coord[i_site])])*np.random.randint(low=0, high=2) )
-        print(f"dl[i_site]: {dl[i_site]}")
+        #print(f"dl[i_site]: {dl[i_site]}")
         
         df[i_site] = 2*dl[i_site]
         #df_target[i_site] = -df[i_site]
@@ -1056,8 +1084,8 @@ class lattice_sim:
         link_coord[i_site,0] = mod_dim[i_site]
         link_coord[i_site,1:] = sites[i_site]
         
-        print(f"df[i_site]: {df[i_site]}")
-        print(f"df_target[i_site]: {df_target[i_site]}")
+        #print(f"df[i_site]: {df[i_site]}")
+        #print(f"df_target[i_site]: {df_target[i_site]}")
         
         moves[i_site] = move_set[mod_dim[i_site]] 
         
@@ -1065,7 +1093,7 @@ class lattice_sim:
 
         #(lat_coord, lat_size, dim):
         self.per_lat_coord(target_sites[i_site], lat_size, dim)
-        print(f"target_sites[i_site]: {target_sites[i_site]}")
+        #print(f"target_sites[i_site]: {target_sites[i_site]}")
 
 
 
@@ -1096,10 +1124,10 @@ class lattice_sim:
         print(f"l_proposed_link {l_proposed_link}")
         print(f"l_old_link {l_old_link}")
         
-        print(f"p_acc[i_site] {p_acc[i_site]}")
+        #print(f"p_acc[i_site] {p_acc[i_site]}")
         
-        print(f"(abs(k_old_link) + l_proposed_link) * l_proposed_link) {(abs(k_old_link) + l_proposed_link) * l_proposed_link}")
-        print(f"(abs(k_old_link) + l_old_link) * l_old_link {(abs(k_old_link) + l_old_link) * l_old_link}")
+        #print(f"(abs(k_old_link) + l_proposed_link) * l_proposed_link) {(abs(k_old_link) + l_proposed_link) * l_proposed_link}")
+        #print(f"(abs(k_old_link) + l_old_link) * l_old_link {(abs(k_old_link) + l_old_link) * l_old_link}")
         
         """REPLACE IF STATEMENT WITH EXPRESSION"""
         if abs(l_proposed_link) > abs(l_old_link):
@@ -1107,101 +1135,24 @@ class lattice_sim:
         else:
             p_acc[i_site] = p_acc[i_site]*(abs(k_old_link) + l_old_link) * l_old_link
         
-        print(f"p_acc[i_site] {p_acc[i_site]}")
+        #print(f"p_acc[i_site] {p_acc[i_site]}")
         
         
-        print(f"int((f_old + df[i_site])/2) {int((f_old + df[i_site])/2)}")
-        print(f"int((f_target + df_target[i_site])/2) {int((f_target + df_target[i_site])/2)}")
-        print(f"int(f_old/2) {int(f_old/2)}")
-        print(f"int((f_target)/2) {int((f_target)/2)}")
-        print(f"W[int((f_old + df[i_site])/2)] {W[int((f_old + df[i_site])/2)]}")
-        print(f"W[int((f_target + df_target[i_site])/2)] {W[int((f_target + df_target[i_site])/2)]}")
-        print(f"W[int(f_old/2)] {W[int(f_old/2)]}")
-        print(f"W[int((f_target)/2)] {W[int((f_target)/2)]}")
+        #print(f"int((f_old + df[i_site])/2) {int((f_old + df[i_site])/2)}")
+        #print(f"int((f_target + df_target[i_site])/2) {int((f_target + df_target[i_site])/2)}")
+        #print(f"int(f_old/2) {int(f_old/2)}")
+        #print(f"int((f_target)/2) {int((f_target)/2)}")
+        #print(f"W[int((f_old + df[i_site])/2)] {W[int((f_old + df[i_site])/2)]}")
+        #print(f"W[int((f_target + df_target[i_site])/2)] {W[int((f_target + df_target[i_site])/2)]}")
+        #print(f"W[int(f_old/2)] {W[int(f_old/2)]}")
+        #print(f"W[int((f_target)/2)] {W[int((f_target)/2)]}")
         
         
         """df_target?"""
         p_acc[i_site] *= ( W[int((f_old + df[i_site])/2)] * W[int((f_target + df_target[i_site])/2)] )/( W[int(f_old/2)] * W[int((f_target)/2)] )
         ###p_acc[i_site] *= W[int((f_old + df[i_site])/2)]/W[int(f_target/2)]
 
-        print(f"p_acc[i_site] {p_acc[i_site]}")
+        #print(f"p_acc[i_site] {p_acc[i_site]}")
         
 
         
-        
-        
-        
-        
-    def mc_sites(self,
-                 sites, target_sites, link_coord,
-                 mod_dim, dl, df, df_target, 
-                 l_links, k_links, W, f,
-                 n_sites,
-                 move_set, moves,
-                 lat_size, dim):
-
-        """
-        MCMC for multiple lattice sites
-        """
-
-        p_draw = np.random.uniform(low=0., high=1., size=n_sites)
-        p = np.ones(len(sites))
-
-        ##draw link and link_modification at random
-        self.draw_sites(mod_dim, dl, df, df_target, link_coord, sites, target_sites, l_links, move_set, moves, n_sites, lat_size, dim)
-
-        """parallelize this loop"""
-        for i_site in range(len(sites)):
-
-            ##get acceptance probability
-            self.get_prob_l_site(l_links, k_links, sites, link_coord, target_sites, i_site, dl, df, df_target, W, f, p)
-
-            #if p_draw[i_site] < p[i_site]:
-            #if p_draw[i_site] < 0.5:
-            if True:
-                #accept
-                #print("accepted")
-                l_links[tuple(link_coord[i_site])] += dl[i_site]
-                f[tuple(sites[i_site])] += df[i_site]
-                f[tuple(target_sites[i_site])] += df_target[i_site]
-            else:
-                #print("rejected")
-                pass
-
-
-    def draw_sites(self,
-                   sites, target_sites,
-                   l_links,
-                   link_coord, mod_dim, dl, df, df_target,
-                   move_set, moves,
-                   lat_size, dim
-                  ):
-        """
-        choose random modifications at random link dimensions
-        """
-        mod_dim = np.random.randint(low=0, high=dim, size=n_sites)
-        
-        #dl[:] = (2*np.random.randint(low=0, high=2, size=n_sites) - 1)[:]
-
-        ##l links > 0
-        ##dl must be > 0 if l = 0
-        for i_site in range(n_sites):
-            #if l_links[tuple(link_coord[i_site])] == 0:
-            #    dl[i_site] = 1
-            #moves[i_site] = move_set[mod_dim[i_site]]
-            dl[i_site] = int (1 - 2*np.sign(l_links[tuple(link_coord[i_site])])*np.random.randint(low=0, high=2) )
-            
-        #print(f"MCMC dl:\n{dl}")
-        """CHECK WHETHER CORRECT"""
-        df[:] = 2*dl[:]
-        df_target[:] = df[:]
-        link_coord[:,0] = mod_dim.copy()
-        link_coord[:,1:] = sites.copy()
-
-        target_sites[:] = (sites + moves)[:]
-
-        #(lat_coord, lat_size, dim):
-        self.per_lat_coord(target_sites, lat_size, dim)
-
-        #print(f"MCMC link_coord:\n{link_coord}")
-        #print(f"MCMC target site:\n{target_sites}")
