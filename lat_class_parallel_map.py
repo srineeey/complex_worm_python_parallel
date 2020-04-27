@@ -42,7 +42,7 @@ class lattice_sim:
         for dim_len in self.lat_size:
             coords.append([i for i in range(dim_len)])
             
-        self.all_site_coords = product(*coords)
+        self.all_site_coords = list(product(*coords))
 
         ##size of one link field on the lattice
         self.link_size = np.concatenate(([len(self.lat_size)], self.lat_size))
@@ -237,6 +237,7 @@ class lattice_sim:
                 target_site  = site_coords + move_set[d]
                 self.per_lat_coord(target_site, lat_size, dim)
                 div[tuple(target_site)] -= k_links[tuple(link_coord)]
+                #div[tuple(target_site)] += k_links[tuple(link_coord)]
 
         print("k_divergence:")
         print(div)
@@ -303,7 +304,7 @@ class lattice_sim:
                                     lat_size, dim
                                     )
                 
-                self.l_pos_check(l_links)
+                #self.l_pos_check(l_links)
                 self.f_check(f, k_links, l_links, lat_size, move_set, dim)
                 self.flux_check(k_links, lat_size, move_set, dim)
 
@@ -318,6 +319,17 @@ class lattice_sim:
         #                      p_acc,
         #                      num_worms, lat_size, dim
         #                      )
+        
+        """WORM CLOSED?"""
+        ##adjust f function at tail with initial df0
+        ##so that it is even at all times
+        """ALREADY ACCOUNTED FOR IN  F UPDATE?"""
+        print(f"incrementing f at {tail[i_worm]} by df0 {df0[i_worm]} and df_prev_iter {df_prev_iter[i_worm]}")
+        f[tuple(tail[i_worm])] += df0[i_worm] + df_prev_iter[i_worm]
+        ##remove the entry in the tail_df_lat array for other worms
+        tail_df_lat[tuple(tail[i_worm])] = 0
+        ##flip the work_head_bit after modifying f safely
+        work_head_lat[tuple(tail[i_worm])] = 0
         
         self.l_pos_check(l_links)
         self.f_check(f, k_links, l_links, lat_size, move_set, dim)
@@ -347,10 +359,10 @@ class lattice_sim:
         
         print("resetting worm")
         
-        tail_df_lat[tuple(tail[i_worm])] = 0
+        #tail_df_lat[tuple(tail[i_worm])] = 0
         worm_closed[i_worm] = 1
-        print("f before:")
-        print(f)
+        #print("f before:")
+        #print(f)
         """F EVEN?"""
         #f[tail[i_worm]] += df0[i_worm]
         print("f after:")
@@ -362,25 +374,46 @@ class lattice_sim:
         ##reset the worm randomly
         ##find a new head and tail
         ##that does not coincide with other worms
-        for d in range(dim):
-            tail[i_worm,d] = np.random.randint(low=0, high=lat_size[d])
-            head[i_worm,0,d] = tail[i_worm,d]
+        #for d in range(dim):
+        #    tail[i_worm,d] = np.random.randint(low=0, high=lat_size[d])
+        #    head[i_worm,0,d] = tail[i_worm,d]
 
 
         """ONLY ACCESS ON WORM AT A TIME"""
-        while old_head_lat[tuple(head[i_worm,0])]:
-            for d in range(dim):
-                tail[i_worm,d] = np.random.randint(low=0, high=lat_size[d])
-                head[i_worm,0,d] = tail[i_worm,d]
+        #while old_head_lat[tuple(head[i_worm,0])]:
+        #    for d in range(dim):
+        #        tail[i_worm,d] = np.random.randint(low=0, high=lat_size[d])
+        #        head[i_worm,0,d] = tail[i_worm,d]
 
         ## it can start working at this head!
         #flip old head bit            
-        old_head_lat[tuple(head[i_worm,0])] = 1
+        #old_head_lat[tuple(head[i_worm,0])] = 1
         
         ##continue sampling until the worm starts and opens up
         while worm_closed[i_worm]:
             
             """PICK RANDOM TAIL HERE"""
+            ##reset the worm randomly
+            ##find a new head and tail
+            ##that does not coincide with other worms
+            for d in range(dim):
+                tail[i_worm,d] = np.random.randint(low=0, high=lat_size[d])
+                head[i_worm,0,d] = tail[i_worm,d]
+
+
+            """ONLY ACCESS ON WORM AT A TIME"""
+            """OLD OR WORK HEAD LAT OR BOTH?"""
+            #while old_head_lat[tuple(head[i_worm,0])]:
+            while work_head_lat[tuple(head[i_worm,0])]:
+                for d in range(dim):
+                    tail[i_worm,d] = np.random.randint(low=0, high=lat_size[d])
+                    head[i_worm,0,d] = tail[i_worm,d]
+
+            ## it can start working at this head!
+            #flip old head bit            
+            #old_head_lat[tuple(head[i_worm,0])] = 1
+            work_head_lat[tuple(head[i_worm,0])] = 1
+            
             #propose an initial move
             self.propose_move_i_worm(i_worm,
                                      k_links,
@@ -417,6 +450,7 @@ class lattice_sim:
                          
         print(f"Resetting worm {i_worm} to tail: {tail[i_worm]}, head: {head[i_worm,0]}\n")
         print(f"with k_delta: {k_delta[i_worm]}\n")
+        print(f"and df0 at tail {df0[i_worm]}")
 
 
 
@@ -526,7 +560,10 @@ class lattice_sim:
             
             print(f"p_acc: {p_acc[i_worm]}")
             print(f"p_draw: {p_draw}")
-            bool_acc = int( (1 + np.sign(p_acc[i_worm] - p_draw))*0.5 )
+            #bool_acc = int( (1 + np.sign(p_acc[i_worm] - p_draw))*0.5 )
+            
+            """FOR WORM TROUBLESHOOTING"""
+            bool_acc = 1
             print(f"accepted: {bool_acc}")
 
             ###accept the move, adapt k and f
@@ -543,6 +580,7 @@ class lattice_sim:
             print("f before:")
             print(f)
             #f[tuple(head[i_worm,0])] += (bool_acc * df[i_worm]) + df_prev_iter[i_worm]
+            
             print(f"old head {tuple(head[i_worm,0])}")
             print(f"df[i_worm] {df[i_worm]}")
             print(f"df_prev_iter[i_worm] {df_prev_iter[i_worm]}")
@@ -560,8 +598,9 @@ class lattice_sim:
             #work_head_lat[tuple(head[i_worm,1])] = bool(bool_acc)
             #work_head_lat[tuple(head[i_worm,0])] = bool(1 - bool_acc)
             
-            work_head_lat[tuple(head[i_worm,1])] = 0
             work_head_lat[tuple(head[i_worm,0])] = 0
+            """PROBLEM WHEN CLOSING?"""
+            #work_head_lat[tuple(head[i_worm,1])] = 0
             
             print(f"Resetting bits at prop_head {head[i_worm,1]}={work_head_lat[tuple(head[i_worm,1])]} and old_head {head[i_worm,0]}={work_head_lat[tuple(head[i_worm,0])]}")
 
@@ -585,6 +624,8 @@ class lattice_sim:
             ##reset prop head to old head
             head[i_worm,1] = head[i_worm,0].copy()
             #moves[i_worm] = np.array([0,0], dtype=np.int64)
+            
+            work_head_lat[tuple(head[i_worm,1])] = worm_closed[i_worm]
             
             
             
@@ -706,7 +747,9 @@ class lattice_sim:
                                          dk, df, df_new_head, df_prev_iter,
                                          p_acc)
             
-            bool_acc = int( (1 + np.sign(p_acc[i_worm] - p_draw))*0.5 )
+            #bool_acc = int( (1 + np.sign(p_acc[i_worm] - p_draw))*0.5 )
+            """FOR WORM TROUBLESHOOTING"""
+            bool_acc = 1
 
             ###accept the move, adapt k and f
 
